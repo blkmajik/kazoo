@@ -42,6 +42,12 @@ class WriterNotClosedException(KazooException):
     .. versionadded:: 1.2
     """
 
+class SaslError(KazooException):
+    """Raised if SASL authentication encounters an error
+
+    .. versionadded:: 1.4.1
+    """
+
 
 def _invalid_error_code():
     raise RuntimeError('Invalid error code')

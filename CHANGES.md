@@ -1,3 +1,7 @@
+<a name="2.4.1"></a>
+#### Features
+* Add ``sasl_principal`` to ``kazoo.client.Client`` to handle SASL mechanisms
+
 <a name="2.4.0"></a>
 ## 2.4.0 (2017-06-14)
 

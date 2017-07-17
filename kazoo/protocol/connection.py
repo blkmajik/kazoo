@@ -14,7 +14,8 @@ from kazoo.exceptions import (
     ConnectionDropped,
     EXCEPTIONS,
     SessionExpiredError,
-    NoNodeError
+    NoNodeError,
+    SaslError,
 )
 from kazoo.loggingsupport import BLATHER
 from kazoo.protocol.serialization import (
@@ -28,7 +29,8 @@ from kazoo.protocol.serialization import (
     ReplyHeader,
     Transaction,
     Watch,
-    int_struct
+    int_struct,
+    SASL,
 )
 from kazoo.protocol.states import (
     Callback,
@@ -40,6 +42,7 @@ from kazoo.retry import (
     ForceRetryError,
     RetryFailedError
 )
+from collections import namedtuple
 
 log = logging.getLogger(__name__)
 
@@ -131,11 +134,12 @@ class RWServerAvailable(Exception):
 
 class ConnectionHandler(object):
     """Zookeeper connection handler"""
-    def __init__(self, client, retry_sleeper, logger=None):
+    def __init__(self, client, retry_sleeper, logger=None, sasl_creds=None):
         self.client = client
         self.handler = client.handler
         self.retry_sleeper = retry_sleeper
         self.logger = logger or log
+        self._sasl_creds = sasl_creds
 
         # Our event objects
         self.connection_closed = client.handler.event_object()
@@ -639,6 +643,9 @@ class ConnectionHandler(object):
                         negotiated_session_timeout, connect_timeout,
                         read_timeout)
 
+        if self._sasl_creds:
+            self._sasl_authenticate(host, connect_timeout/1000.00)
+
         if connect_result.read_only:
             client._session_callback(KeeperState.CONNECTED_RO)
             self._ro_mode = iter(self._server_pinger())
@@ -653,3 +660,55 @@ class ConnectionHandler(object):
                 client.last_zxid = zxid
 
         return read_timeout, connect_timeout
+
+
+    def _sasl_authenticate(self, host, timeout):
+        # Only require puresasl if we are using sasl
+        import puresasl
+        if self._sasl_creds.method == "GSSAPI":
+            sasl = puresasl.client.SASLClient(host, self._sasl_creds.method,
+                principal=self._sasl_creds.principal,
+            )
+        elif self._sasl_creds.method == "DIGEST-MD5":
+            sasl = puresasl.client.SASLClient(host, self._sasl_creds.method,
+                username= self._sasl_creds.username,
+                password= self._sasl_creds.password,
+            )
+        else:
+            raise SaslError("Auth Unsupported SASL type: %s" % (
+                self._sasl_creds.method))
+
+
+        # Build initial response
+        rsp = None
+
+        xid = 0
+        while True:
+            xid += 1
+
+            req = sasl.process(challenge=rsp)
+            self._submit(req, timeout, xid)
+
+            hdr, rsp, offset = self._read_header(timeout)
+
+            if hdr.xid != xid:
+                raise ValueError("xid does not match.  Got %r expected %r" % (
+                    hdr.xid, xid))
+
+            if hdr.zxid > 0:
+                self.client.last_zxid = hdr.zxid
+
+            if hdr.err:
+                callback_exception = EXCEPTIONS[hdr.err]()
+                self.logger.debug(
+                    'Received error(xid=%s) %r', xid, callback_exception)
+                raise callback_exception
+
+            #rsp = sasl.unwrap(buff)
+
+            if not rsp:
+                break
+
+        if not sasl.complete:
+            raise SaslError("SASL auth did not complete")
+

@@ -98,6 +98,17 @@ _RETRY_COMPAT_MAPPING = dict(
     retry_max_delay='max_delay',
 )
 
+def CredentialMap(method):
+    if method == "DIGEST-MD5":
+        creds = collections.namedtuple("creds", "method username password")
+        creds.method = "DIGEST-MD5"
+    elif method == "GSSAPI":
+        creds = collections.namedtuple("creds", "method principal")
+        creds.method = "GSSAPI"
+    else:
+        raise ValueError("Unknown SASL method: %s" % method)
+    
+    return creds
 
 class KazooClient(object):
     """An Apache Zookeeper Python client supporting alternate callback
@@ -113,7 +124,8 @@ class KazooClient(object):
                  timeout=10.0, client_id=None, handler=None,
                  default_acl=None, auth_data=None, read_only=None,
                  randomize_hosts=True, connection_retry=None,
-                 command_retry=None, logger=None, **kwargs):
+                 command_retry=None, logger=None,
+                 sasl_creds=None, **kwargs):
         """Create a :class:`KazooClient` instance. All time arguments
         are in seconds.
 
@@ -142,6 +154,8 @@ class KazooClient(object):
             options which will be used for creating one.
         :param logger: A custom logger to use instead of the module
             global `log` instance.
+        :param sasl_creds: SASL credentials used to connect to authenticated
+            Zookeeper servers.
 
         Basic Example:
 
@@ -199,6 +213,7 @@ class KazooClient(object):
         self._data_watchers = defaultdict(set)
         self._reset()
         self.read_only = read_only
+        self._sasl_creds = sasl_creds
 
         if client_id:
             self._session_id = client_id[0]
@@ -269,7 +284,8 @@ class KazooClient(object):
 
         self._conn_retry.interrupt = lambda: self._stopped.is_set()
         self._connection = ConnectionHandler(
-            self, self._conn_retry.copy(), logger=self.logger)
+            self, self._conn_retry.copy(), logger=self.logger,
+            sasl_creds=self._sasl_creds)
 
         # Every retry call should have its own copy of the retry helper
         # to avoid shared retry counts

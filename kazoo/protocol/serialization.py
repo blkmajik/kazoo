@@ -411,3 +411,16 @@ class MultiHeader(namedtuple('MultiHeader', 'type done err')):
         t, done, err = multiheader_struct.unpack_from(bytes, offset)
         offset += multiheader_struct.size
         return cls(t, done is 1, err), offset
+
+class SASL(namedtuple('SASL', 'token')):
+    def serialize(self):
+        b = bytearray()
+        b.extend(write_buffer(self.token))
+        return b
+
+    @classmethod
+    def deserialize(cls, bytes, offset):
+        token, offset = read_buffer(bytes, offset)
+        return cls(token), offset
+
+    
