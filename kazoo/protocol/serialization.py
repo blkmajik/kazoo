@@ -413,9 +413,15 @@ class MultiHeader(namedtuple('MultiHeader', 'type done err')):
         return cls(t, done is 1, err), offset
 
 class SASL(namedtuple('SASL', 'token')):
+    type = 102
+
     def serialize(self):
         b = bytearray()
-        b.extend(write_buffer(self.token))
+        if self.token == None:
+            # Empty packet to trigger SASL authorization
+            b.extend(write_buffer(""))
+        else:
+            b.extend(write_buffer(self.token))
         return b
 
     @classmethod
@@ -423,4 +429,4 @@ class SASL(namedtuple('SASL', 'token')):
         token, offset = read_buffer(bytes, offset)
         return cls(token), offset
 
-    
+

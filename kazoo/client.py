@@ -3,7 +3,7 @@ import inspect
 import logging
 import re
 import warnings
-from collections import defaultdict, deque
+from collections import defaultdict, deque, namedtuple
 from functools import partial
 from os.path import split
 
@@ -100,14 +100,14 @@ _RETRY_COMPAT_MAPPING = dict(
 
 def CredentialMap(method):
     if method == "DIGEST-MD5":
-        creds = collections.namedtuple("creds", "method username password")
+        creds = namedtuple("creds", "method username password")
         creds.method = "DIGEST-MD5"
     elif method == "GSSAPI":
-        creds = collections.namedtuple("creds", "method principal")
+        creds = namedtuple("creds", "method principal")
         creds.method = "GSSAPI"
     else:
         raise ValueError("Unknown SASL method: %s" % method)
-    
+
     return creds
 
 class KazooClient(object):

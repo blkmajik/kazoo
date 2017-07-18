@@ -3,6 +3,8 @@ import logging
 import random
 import select
 import socket
+import os
+import hashlib
 
 import sys
 import time
@@ -42,7 +44,6 @@ from kazoo.retry import (
     ForceRetryError,
     RetryFailedError
 )
-from collections import namedtuple
 
 log = logging.getLogger(__name__)
 
@@ -664,32 +665,40 @@ class ConnectionHandler(object):
 
     def _sasl_authenticate(self, host, timeout):
         # Only require puresasl if we are using sasl
-        import puresasl
+        import puresasl.client
         if self._sasl_creds.method == "GSSAPI":
             sasl = puresasl.client.SASLClient(host, self._sasl_creds.method,
                 principal=self._sasl_creds.principal,
             )
         elif self._sasl_creds.method == "DIGEST-MD5":
-            sasl = puresasl.client.SASLClient(host, self._sasl_creds.method,
-                username= self._sasl_creds.username,
-                password= self._sasl_creds.password,
+            user = self._sasl_creds.username
+            pw = self._sasl_creds.password
+            service = "zookeeper"
+
+            sasl = puresasl.client.SASLClient(host,
+                    service=service,
+                    mechanism=self._sasl_creds.method,
+                    username=user,
+                    password=pw,
             )
         else:
             raise SaslError("Auth Unsupported SASL type: %s" % (
                 self._sasl_creds.method))
 
+        sasl.choose_mechanism([self._sasl_creds.method], allow_anonymous=False)
 
         # Build initial response
+        #rsp = sasl.process(challenge=None)
         rsp = None
 
         xid = 0
         while True:
             xid += 1
 
-            req = sasl.process(challenge=rsp)
+            req = SASL(rsp)
             self._submit(req, timeout, xid)
 
-            hdr, rsp, offset = self._read_header(timeout)
+            hdr, buff, offset = self._read_header(timeout)
 
             if hdr.xid != xid:
                 raise ValueError("xid does not match.  Got %r expected %r" % (
@@ -704,9 +713,16 @@ class ConnectionHandler(object):
                     'Received error(xid=%s) %r', xid, callback_exception)
                 raise callback_exception
 
-            #rsp = sasl.unwrap(buff)
+            token, _ = SASL.deserialize(buff, offset)
+            self.logger.debug(
+                'Received token(xid=%s) %r', xid, token.token)
+            if not token:
+                break
 
-            if not rsp:
+            rsp = sasl.process(challenge=token.token)
+
+            # Successful authentication
+            if sasl.complete:
                 break
 
         if not sasl.complete:
